@@ -42,6 +42,13 @@
                   (write-string indent out)
                   (write-string line out))))))
 
+(defun %main-guard (body)
+  "Return a script-guard snippet that runs BODY when the module is executed directly."
+  (let ((indented (%indent-block body)))
+    (format nil
+            "const THIS_MODULE = fileURLToPath(import.meta.url);~%const ENTRY = process.argv[1] ? resolve(process.cwd(), process.argv[1]) : null;~%if (ENTRY && THIS_MODULE === ENTRY) {~%~a~%}~%"
+            indented)))
+
 (defun generate-basic-example-js (&key (module-name *default-module-name*)
                                        (binding 'capnweb))
   "Return an ES module string that demonstrates the ParenScript wrapper."
@@ -66,59 +73,57 @@
   (multiple-value-bind (binding-symbol binding-name)
       (%ensure-binding-symbol binding)
     (let ((capnweb.parenscript:*capnweb-binding* binding-symbol)
-          (parenscript:*ps-print-pretty* t))
-      (let* ((api-body (ps '(let ((target (capnweb.parenscript:rpc-target)))
-                              (setf (ps:chain target ping)
-                                    (lambda (message)
-                                      (let ((reply (if message message "pong from server")))
-                                        (ps:chain console (log "server ping ->" reply))
-                                        (return reply))))
-                              (return target))))
-             (server-lines (%join-lines
-                             (list
-                              "const opts = options || {};"
-                              "const api = opts.api || makeApi();"
-                              "const endpointPath = typeof opts.path === \"string\" ? opts.path : \"/rpc\";"
-                              "let portValue = opts.port;"
-                              "if (portValue === undefined || portValue === null) {"
-                              "  portValue = process.env.PORT;"
-                              "}"
-                              "if (portValue === undefined || portValue === null) {"
-                              "  portValue = 3000;"
-                              "}"
-                              "let port = typeof portValue === \"number\" ? portValue : Number(portValue);"
-                              "if (!Number.isFinite(port)) {"
-                              "  port = 3000;"
-                              "}"
-                              "const server = http.createServer((req, res) => {"
-                              "  if (req.method !== \"POST\" || req.url !== endpointPath) {"
-                              "    res.writeHead(404, { \"content-type\": \"text/plain\" });"
-                              "    res.end(\"Not Found\");"
-                              "    return;"
-                              "  }"
-                              (format nil "  ~a.nodeHttpBatchRpcResponse(req, res, api).catch((err) => {"
-                                      binding-name)
-                              "    res.writeHead(500, { \"content-type\": \"text/plain\" });"
-                              "    const message = err && err.stack ? String(err.stack) : String(err);"
-                              "    res.end(message);"
+    (parenscript:*ps-print-pretty* t))
+      (let* ((api-lines (%join-lines
+       (list
+        "class PingApi extends capnweb.RpcTarget {"
+        "  async ping(message) {"
+        "    const reply = message != null ? message : \"pong from server\";"
+        "    console.log(\"server ping ->\", reply);"
+        "    return reply;"
+        "  }"
+        "}"
+        "return new PingApi();")))
+       (server-lines (%join-lines
+           (list
+            "const opts = options || {};"
+            "const api = opts.api || makeApi();"
+            "const endpointPath = typeof opts.path === \"string\" ? opts.path : \"/rpc\";"
+            "let portValue = opts.port;"
+            "if (portValue === undefined || portValue === null) {"
+            "  portValue = process.env.PORT;"
+            "}"
+            "if (portValue === undefined || portValue === null) {"
+            "  portValue = 3000;"
+            "}"
+            "let port = typeof portValue === \"number\" ? portValue : Number(portValue);"
+            "if (!Number.isFinite(port)) {"
+            "  port = 3000;"
+            "}"
+            "const server = http.createServer((req, res) => {"
+            "  if (req.method !== \"POST\" || req.url !== endpointPath) {"
+            "    res.writeHead(404, { \"content-type\": \"text/plain\" });"
+            "    res.end(\"Not Found\");"
+            "    return;"
+            "  }"
+            (format nil "  ~a.nodeHttpBatchRpcResponse(req, res, api).catch((err) => {"
+              binding-name)
+            "    res.writeHead(500, { \"content-type\": \"text/plain\" });"
+            "    const message = err && err.stack ? String(err.stack) : String(err);"
+            "    res.end(message);"
             "  });"
             "});"
             "server.listen(port, () => {"
             "  console.log(`capnweb RPC server listening on http://localhost:${port}${endpointPath}`);"
             "});"
             "return server;")))
-             (api-block (%indent-block api-body))
+       (api-block (%indent-block api-lines))
        (server-block (%indent-block server-lines))
-       (main-guard (format nil
-         (concatenate 'string
-                "const THIS_MODULE = fileURLToPath(import.meta.url);~%"
-                "if (process.argv[1] && THIS_MODULE === process.argv[1]) {~%"
-                "  startServer();~%"
-                "}~%"))))
+       (main-guard (%main-guard "startServer();")))
   (format nil
-    "import http from \"node:http\";~%import { fileURLToPath } from \"node:url\";~%import * as ~a from \"~a\";~%~%export function makeApi() {~%~a~%}~%~%export function startServer(options = {}) {~%~a~%}~%~a"
-                binding-name module-name
-                api-block
+    "import http from \"node:http\";~%import { fileURLToPath } from \"node:url\";~%import { resolve } from \"node:path\";~%import * as ~a from \"~a\";~%~%export function makeApi() {~%~a~%}~%~%export function startServer(options = {}) {~%~a~%}~%~a"
+    binding-name module-name
+    api-block
     server-block
     main-guard)))))
 
@@ -131,18 +136,16 @@
           (parenscript:*ps-print-pretty* t))
       (let* ((stub-expr (ps '(capnweb.parenscript:new-http-batch-session endpoint)))
         (call-expr (ps '(ps:chain remote (ping message))))
-             (main-guard (format nil
-                                 (concatenate 'string
-                                              "const THIS_MODULE = fileURLToPath(import.meta.url);~%"
-                                              "if (process.argv[1] && THIS_MODULE === process.argv[1]) {~%"
-                                              "  const message = process.argv.length > 2 ? process.argv[2] : \"ping\";~%"
-                                              "  runClient({ message }).catch((err) => {~%"
-                "    console.error(err);~%"
-                "    process.exitCode = 1;~%"
-                "  });~%"
-                "}~%"))))
+        (guard-body (%join-lines
+           (list
+            "const message = process.argv.length > 2 ? process.argv[2] : \"ping\";"
+            "runClient({ message }).catch((err) => {"
+            "  console.error(err);"
+            "  process.exitCode = 1;"
+            "});")))
+        (main-guard (%main-guard guard-body)))
         (format nil
-      "import { fileURLToPath } from \"node:url\";~%import * as ~a from \"~a\";~%~%const DEFAULT_ENDPOINT = \"http://localhost:3000/rpc\";~%~%export async function runClient({ endpoint = DEFAULT_ENDPOINT, message = \"ping\" } = {}) {~%  const remote = ~a;~%  const pong = await ~a;~%  console.log(\"capnweb client received:\", pong);~%  return pong;~%}~%~%export function createStub(endpoint = DEFAULT_ENDPOINT) {~%  return ~a;~%}~%~a"
+      "import { fileURLToPath } from \"node:url\";~%import { resolve } from \"node:path\";~%import * as ~a from \"~a\";~%~%const DEFAULT_ENDPOINT = \"http://localhost:3000/rpc\";~%~%export async function runClient({ endpoint = DEFAULT_ENDPOINT, message = \"ping\" } = {}) {~%  const remote = ~a;~%  const pong = await ~a;~%  console.log(\"capnweb client received:\", pong);~%  return pong;~%}~%~%export function createStub(endpoint = DEFAULT_ENDPOINT) {~%  return ~a;~%}~%~a"
                 binding-name module-name
                 stub-expr
                 call-expr

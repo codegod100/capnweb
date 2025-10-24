@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import * as capnweb from "capnweb";
 
 const DEFAULT_ENDPOINT = "http://localhost:3000/rpc";
@@ -15,7 +16,8 @@ export function createStub(endpoint = DEFAULT_ENDPOINT) {
 }
 
 const THIS_MODULE = fileURLToPath(import.meta.url);
-if (process.argv[1] && THIS_MODULE === process.argv[1]) {
+const ENTRY = process.argv[1] ? resolve(process.cwd(), process.argv[1]) : null;
+if (ENTRY && THIS_MODULE === ENTRY) {
   const message = process.argv.length > 2 ? process.argv[2] : "ping";
   runClient({ message }).catch((err) => {
     console.error(err);

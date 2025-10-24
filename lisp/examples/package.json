@@ -1,0 +1,16 @@
+{
+  "name": "capnweb-lisp-examples",
+  "version": "0.1.0",
+  "description": "Demo Node client/server generated from the capnweb ParenScript bindings.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm --prefix ../.. run build",
+    "server": "node node-server.mjs",
+    "client": "node node-client.mjs",
+    "start": "npm run server"
+  },
+  "dependencies": {
+    "capnweb": "file:../.."
+  }
+}

@@ -1,15 +1,18 @@
 import http from "node:http";
 import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import * as capnweb from "capnweb";
 
 export function makeApi() {
-  var target = new capnweb.RpcTarget();
-  target.ping = function (message) {
-    var reply = message ? message : "pong from server";
-    console.log("server ping ->", reply);
-    return reply;
-  };
-  return target;
+  class PingApi extends capnweb.RpcTarget {
+    async ping(message) {
+      const reply = message != null ? message : "pong from server";
+      console.log("server ping ->", reply);
+      return reply;
+    }
+  }
+
+  return new PingApi();
 }
 
 export function startServer(options = {}) {
@@ -46,6 +49,7 @@ export function startServer(options = {}) {
 }
 
 const THIS_MODULE = fileURLToPath(import.meta.url);
-if (process.argv[1] && THIS_MODULE === process.argv[1]) {
+const ENTRY = process.argv[1] ? resolve(process.cwd(), process.argv[1]) : null;
+if (ENTRY && THIS_MODULE === ENTRY) {
   startServer();
 }
